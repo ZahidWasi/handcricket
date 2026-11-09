@@ -11,7 +11,8 @@ class PeerService {
     this.myMove = null;
     this.hasLocked = false;
     this.opponentHasLocked = false;
-    this.opponentMove = null;
+    this.hostMove = null;
+    this.guestMove = null;
   }
 
   on(event, handler) {
@@ -69,7 +70,6 @@ class PeerService {
         this.peer.on('error', (err) => {
           console.error('PeerJS Host Error:', err);
           if (err.type === 'unavailable-id') {
-            // Retry with another code
             this.roomCode = this.generateRoomCode();
             this.createRoom(this.roomCode).then(resolve).catch(reject);
           } else {
@@ -177,15 +177,45 @@ class PeerService {
         this.emit('tossDecision', data);
         break;
 
-      case 'MOVE_LOCK':
-        this.opponentHasLocked = true;
-        this.emit('opponentLocked');
-        this.checkSimultaneousReveal();
+      // Move synchronization
+      case 'GUEST_MOVE':
+        if (this.isHost) {
+          this.guestMove = data.value;
+          this.opponentHasLocked = true;
+          this.emit('opponentLocked');
+          this.checkHostResolve();
+        }
         break;
 
-      case 'MOVE_REVEAL':
-        this.opponentMove = data.value;
-        this.checkSimultaneousReveal();
+      case 'HOST_LOCKED':
+        if (!this.isHost) {
+          this.opponentHasLocked = true;
+          this.emit('opponentLocked');
+        }
+        break;
+
+      case 'BALL_RESOLVED':
+        // Guest receives authoritative ball outcome from Host
+        if (!this.isHost) {
+          this.hasLocked = false;
+          this.opponentHasLocked = false;
+          this.emit('ballResolved', data);
+        }
+        break;
+
+      case 'REQ_START_INNINGS_2':
+        if (this.isHost) {
+          this.send('START_INNINGS_2');
+          this.emit('startInnings2');
+        }
+        break;
+
+      case 'START_INNINGS_2':
+        this.emit('startInnings2');
+        break;
+
+      case 'START_SUPER_OVER':
+        this.emit('startSuperOver');
         break;
 
       case 'CHAT_MSG':
@@ -210,35 +240,40 @@ class PeerService {
     }
   }
 
-  // Fair Play Simultaneous Locking & Revealing
   submitMove(value) {
-    this.myMove = value;
+    this.myMove = Number(value);
     this.hasLocked = true;
-    this.send('MOVE_LOCK');
-    this.checkSimultaneousReveal();
+
+    if (this.isHost) {
+      this.hostMove = this.myMove;
+      this.send('HOST_LOCKED');
+      this.checkHostResolve();
+    } else {
+      this.send('GUEST_MOVE', { value: this.myMove });
+    }
   }
 
-  checkSimultaneousReveal() {
-    if (this.hasLocked && this.opponentHasLocked) {
-      // Both have locked in! Now reveal both safely
-      if (this.myMove !== null) {
-        this.send('MOVE_REVEAL', { value: this.myMove });
-      }
+  checkHostResolve() {
+    if (this.isHost && this.hostMove !== null && this.guestMove !== null) {
+      const moves = {
+        hostMove: this.hostMove,
+        guestMove: this.guestMove
+      };
+      this.hostMove = null;
+      this.guestMove = null;
+      this.hasLocked = false;
+      this.opponentHasLocked = false;
 
-      if (this.myMove !== null && this.opponentMove !== null) {
-        const moves = {
-          myMove: this.myMove,
-          opponentMove: this.opponentMove
-        };
-        // Reset for next ball
-        this.myMove = null;
-        this.opponentMove = null;
-        this.hasLocked = false;
-        this.opponentHasLocked = false;
-
-        this.emit('movesRevealed', moves);
-      }
+      this.emit('hostMovesReady', moves);
     }
+  }
+
+  resetMoves() {
+    this.myMove = null;
+    this.hasLocked = false;
+    this.opponentHasLocked = false;
+    this.hostMove = null;
+    this.guestMove = null;
   }
 
   disconnect() {
@@ -252,6 +287,7 @@ class PeerService {
     }
     this.isHost = false;
     this.roomCode = null;
+    this.resetMoves();
   }
 }
 

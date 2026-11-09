@@ -172,7 +172,19 @@ class App {
     // Innings Break Start Button
     document.getElementById('btn-start-innings-2').addEventListener('click', () => {
       audioManager.play('click');
-      this.startSecondInnings();
+      if (this.selectedMode === 'pvp') {
+        if (peerService.isHost) {
+          peerService.send('START_INNINGS_2');
+          this.startSecondInnings();
+        } else {
+          peerService.send('REQ_START_INNINGS_2');
+          const btn = document.getElementById('btn-start-innings-2');
+          btn.innerText = 'Waiting for Host...';
+          btn.disabled = true;
+        }
+      } else {
+        this.startSecondInnings();
+      }
     });
 
     // Super Over Start Button
@@ -544,7 +556,8 @@ class App {
       setTimeout(() => {
         const batsmanMove = isPlayerBatting ? move : botMove;
         const bowlerMove = isPlayerBatting ? botMove : move;
-        this.revealSimultaneousMoves(move, botMove, batsmanMove, bowlerMove);
+        const result = this.game.playBall(batsmanMove, bowlerMove);
+        this.revealSimultaneousMoves(move, botMove, result);
       }, 400);
 
     } else if (this.selectedMode === 'pvp') {
@@ -566,21 +579,20 @@ class App {
         const isP1Batting = this.game.getCurrentInnings().batsman.id === this.game.player1.id;
         const batsmanMove = isP1Batting ? this.localP1Move : this.localP2Move;
         const bowlerMove = isP1Batting ? this.localP2Move : this.localP1Move;
-        this.revealSimultaneousMoves(this.localP1Move, this.localP2Move, batsmanMove, bowlerMove);
+        const result = this.game.playBall(batsmanMove, bowlerMove);
+        this.revealSimultaneousMoves(this.localP1Move, this.localP2Move, result);
       }
     }
   }
 
-  revealSimultaneousMoves(p1DisplayMove, p2DisplayMove, batsmanMove, bowlerMove) {
+  revealSimultaneousMoves(myDisplayMove, oppDisplayMove, result) {
     // Show hands
-    document.getElementById('img-player-hand').src = `assets/hand-${p1DisplayMove}.png`;
-    document.getElementById('text-player-val').innerText = p1DisplayMove;
+    document.getElementById('img-player-hand').src = `assets/hand-${myDisplayMove}.png`;
+    document.getElementById('text-player-val').innerText = myDisplayMove;
 
-    document.getElementById('img-opponent-hand').src = `assets/hand-${p2DisplayMove}.png`;
-    document.getElementById('text-opponent-val').innerText = p2DisplayMove;
+    document.getElementById('img-opponent-hand').src = `assets/hand-${oppDisplayMove}.png`;
+    document.getElementById('text-opponent-val').innerText = oppDisplayMove;
 
-    // Execute game engine turn
-    const result = this.game.playBall(batsmanMove, bowlerMove);
     this.triggerDuelCelebration(result);
   }
 
@@ -672,6 +684,12 @@ class App {
   }
 
   startSecondInnings() {
+    const btn = document.getElementById('btn-start-innings-2');
+    if (btn) {
+      btn.innerText = 'START 2ND INNINGS CHASE 🏏';
+      btn.disabled = false;
+    }
+    peerService.resetMoves();
     this.showScreen('match');
     this.updateRoleLabels();
     this.updateMatchScoreboard();
@@ -853,43 +871,43 @@ class App {
       }
     });
 
-    peerService.on('movesRevealed', ({ myMove, opponentMove }) => {
-      const isHost = peerService.isHost;
-      const p1Move = isHost ? myMove : opponentMove;
-      const p2Move = isHost ? opponentMove : myMove;
-
+    peerService.on('hostMovesReady', ({ hostMove, guestMove }) => {
       const isP1Batting = this.game.getCurrentInnings().batsman.id === this.game.player1.id;
-      const batsmanMove = isP1Batting ? p1Move : p2Move;
-      const bowlerMove = isP1Batting ? p2Move : p1Move;
+      const batsmanMove = isP1Batting ? hostMove : guestMove;
+      const bowlerMove = isP1Batting ? guestMove : hostMove;
 
-      this.revealSimultaneousMoves(myMove, opponentMove, batsmanMove, bowlerMove);
+      const result = this.game.playBall(batsmanMove, bowlerMove);
+
+      // Broadcast authoritative outcome and game state to Guest
+      peerService.send('BALL_RESOLVED', {
+        hostMove,
+        guestMove,
+        result,
+        innings1: this.game.innings1,
+        innings2: this.game.innings2,
+        currentInnings: this.game.currentInnings,
+        isSuperOver: this.game.isSuperOver
+      });
+
+      this.revealSimultaneousMoves(hostMove, guestMove, result);
     });
 
-    // Chat and Reactions
-    peerService.on('chatMessage', (data) => {
-      this.appendChatMessage(data.sender, data.text, false);
-      if (!this.chatOpen) {
-        this.unreadChatCount += 1;
-        document.getElementById('chat-unread-badge').classList.remove('hidden');
-      }
+    peerService.on('ballResolved', (data) => {
+      // Synchronize exact game state from Host
+      this.game.innings1 = data.innings1;
+      this.game.innings2 = data.innings2;
+      this.game.currentInnings = data.currentInnings;
+      this.game.isSuperOver = data.isSuperOver;
+
+      // On Guest's device: myMove is guestMove, opponentMove is hostMove
+      this.revealSimultaneousMoves(data.guestMove, data.hostMove, data.result);
     });
 
-    peerService.on('reactionReceived', (data) => {
-      this.showFloatingReaction(data.text);
+    peerService.on('startInnings2', () => {
+      this.startSecondInnings();
     });
 
-    peerService.on('rematchOffered', () => {
-      if (confirm('Opponent wants a rematch! Accept?')) {
-        peerService.send('REMATCH_ACCEPT');
-        this.setupPvPMatchStart();
-      }
-    });
-
-    peerService.on('rematchAccepted', () => {
-      this.setupPvPMatchStart();
-    });
-
-    peerService.on('START_SUPER_OVER', () => {
+    peerService.on('startSuperOver', () => {
       this.executeSuperOverStart();
     });
 
