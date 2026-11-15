@@ -159,6 +159,11 @@ class App {
     // Chat Drawer Toggle & Submit
     document.getElementById('btn-toggle-chat').addEventListener('click', () => this.toggleChat(true));
     document.getElementById('btn-close-chat').addEventListener('click', () => this.toggleChat(false));
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.chatOpen) {
+        this.toggleChat(false);
+      }
+    });
     document.getElementById('form-chat').addEventListener('submit', (e) => {
       e.preventDefault();
       const input = document.getElementById('input-chat-msg');
@@ -958,6 +963,28 @@ class App {
       alert('Opponent disconnected from the match.');
       this.goToMenu();
     });
+
+    // Chat & Sledge Reaction Listeners
+    peerService.on('chatMessage', (data) => {
+      audioManager.play('click');
+      this.appendChatMessage(data.sender || 'Opponent', data.text, false);
+      if (!this.chatOpen) {
+        this.unreadChatCount += 1;
+        const badge = document.getElementById('chat-unread-badge');
+        if (badge) badge.classList.remove('hidden');
+      }
+    });
+
+    peerService.on('reactionReceived', (data) => {
+      audioManager.play('click');
+      this.showFloatingReaction(data.text);
+      this.appendChatMessage(data.sender || 'Opponent', data.text, false);
+      if (!this.chatOpen) {
+        this.unreadChatCount += 1;
+        const badge = document.getElementById('chat-unread-badge');
+        if (badge) badge.classList.remove('hidden');
+      }
+    });
   }
 
   startPvPRematch() {
@@ -1005,7 +1032,10 @@ class App {
     if (open) {
       drawer.classList.remove('translate-x-full');
       this.unreadChatCount = 0;
-      document.getElementById('chat-unread-badge').classList.add('hidden');
+      const badge = document.getElementById('chat-unread-badge');
+      if (badge) badge.classList.add('hidden');
+      const input = document.getElementById('input-chat-msg');
+      if (input) setTimeout(() => input.focus(), 150);
     } else {
       drawer.classList.add('translate-x-full');
     }
@@ -1013,7 +1043,7 @@ class App {
 
   sendChatMessage(text, isSledge = false) {
     if (!text) return;
-    this.appendChatMessage(this.myNickname, text, true);
+    this.appendChatMessage(this.myNickname || 'You', text, true);
 
     if (this.selectedMode === 'pvp') {
       if (isSledge) {
@@ -1021,6 +1051,29 @@ class App {
       } else {
         peerService.send('CHAT_MSG', { sender: this.myNickname, text });
       }
+    } else if (this.selectedMode === 'pvc') {
+      // Responsive banter from Bot in PvC mode
+      const botReplies = [
+        "Watch out for my next delivery! 🏏",
+        "Fielding placement is set! 🎯",
+        "All eyes on the trophy! 🏆",
+        "Let's see what you've got! 💪",
+        "Focus on the pitch! 🔥",
+        "Haha, bring it on! ⚡"
+      ];
+      setTimeout(() => {
+        const botReply = botReplies[Math.floor(Math.random() * botReplies.length)];
+        const botName = this.game.player2 ? this.game.player2.name : 'Bot';
+        this.appendChatMessage(botName, botReply, false);
+        if (isSledge) {
+          this.showFloatingReaction(botReply);
+        }
+        if (!this.chatOpen) {
+          this.unreadChatCount += 1;
+          const badge = document.getElementById('chat-unread-badge');
+          if (badge) badge.classList.remove('hidden');
+        }
+      }, 1000);
     }
 
     if (isSledge) {
