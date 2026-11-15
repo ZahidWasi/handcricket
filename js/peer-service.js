@@ -234,6 +234,10 @@ class PeerService {
         this.emit('rematchAccepted', data);
         break;
 
+      case 'REMATCH_DECLINE':
+        this.emit('rematchDeclined', data);
+        break;
+
       default:
         this.emit(data.type, data);
         break;

@@ -200,12 +200,31 @@ class App {
     document.getElementById('btn-rematch').addEventListener('click', () => {
       audioManager.play('click');
       if (this.selectedMode === 'pvp') {
-        peerService.send('REMATCH_OFFER');
-        alert('Rematch request sent to opponent!');
+        const btn = document.getElementById('btn-rematch');
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i><span>Waiting for Opponent...</span>';
+        btn.disabled = true;
+        peerService.send('REMATCH_OFFER', { sender: this.myNickname });
       } else {
         this.startGame();
       }
     });
+
+    // Rematch Modal Buttons
+    document.getElementById('btn-accept-rematch').addEventListener('click', () => {
+      audioManager.play('click');
+      const modal = document.getElementById('modal-rematch');
+      if (modal) modal.classList.add('hidden');
+      peerService.send('REMATCH_ACCEPT');
+      this.startPvPRematch();
+    });
+
+    document.getElementById('btn-decline-rematch').addEventListener('click', () => {
+      audioManager.play('click');
+      const modal = document.getElementById('modal-rematch');
+      if (modal) modal.classList.add('hidden');
+      peerService.send('REMATCH_DECLINE');
+    });
+
     document.getElementById('btn-back-menu').addEventListener('click', () => {
       if (this.selectedMode === 'pvp') {
         peerService.disconnect();
@@ -911,14 +930,71 @@ class App {
       this.executeSuperOverStart();
     });
 
+    // Rematch Listeners
+    peerService.on('rematchOffered', (data) => {
+      audioManager.play('click');
+      const text = document.getElementById('rematch-requester-text');
+      if (text) {
+        text.innerText = `${data.sender || 'Opponent'} has challenged you to a rematch!`;
+      }
+      const modal = document.getElementById('modal-rematch');
+      if (modal) modal.classList.remove('hidden');
+    });
+
+    peerService.on('rematchAccepted', () => {
+      audioManager.play('cheer');
+      this.startPvPRematch();
+    });
+
+    peerService.on('rematchDeclined', () => {
+      const btn = document.getElementById('btn-rematch');
+      if (btn) {
+        btn.innerHTML = '<i class="fa-solid fa-rotate-right mr-1.5"></i><span>Rematch Declined (Play Again?)</span>';
+        btn.disabled = false;
+      }
+    });
+
     peerService.on('peerDisconnected', () => {
       alert('Opponent disconnected from the match.');
       this.goToMenu();
     });
   }
 
-  setupPvPMatchStart() {
+  startPvPRematch() {
+    const p1Name = this.game.player1.name;
+    const p1Team = this.game.player1.team;
+    const p2Name = this.game.player2.name;
+    const p2Team = this.game.player2.team;
+
+    this.game.reset();
+    this.game.mode = 'pvp';
+    this.game.setMaxBallsFromOvers(this.selectedOvers);
+
+    this.game.player1.name = p1Name;
+    this.game.player1.team = p1Team;
+    this.game.player2.name = p2Name;
+    this.game.player2.team = p2Team;
+
+    peerService.resetMoves();
+
+    const btnRematch = document.getElementById('btn-rematch');
+    if (btnRematch) {
+      btnRematch.innerHTML = '<i class="fa-solid fa-rotate-right mr-1.5"></i><span>PLAY REMATCH</span>';
+      btnRematch.disabled = false;
+    }
+
+    const rematchModal = document.getElementById('modal-rematch');
+    if (rematchModal) rematchModal.classList.add('hidden');
+    const superOverModal = document.getElementById('modal-super-over');
+    if (superOverModal) superOverModal.classList.add('hidden');
+    const soBadge = document.getElementById('badge-super-over-active');
+    if (soBadge) soBadge.classList.add('hidden');
+
     this.startTossScreen();
+  }
+
+  setupPvPMatchStart() {
+    this.startPvPRematch();
   }
 
   // ================= CHAT & REACTIONS =================
